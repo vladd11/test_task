@@ -1,0 +1,105 @@
+import json
+import traceback
+from datetime import datetime
+from typing import Any, Mapping, List
+from urllib.parse import urlparse, quote_plus
+
+import scrapy
+
+from alco.items import Product, PriceData, AssetsData
+
+
+class AlcoSpider(scrapy.Spider):
+    START_URLS = [
+        "https://alkoteka.com/catalog/slaboalkogolnye-napitki-2",
+    ]
+    name = "alco_spider"
+    API_URL = "https://alkoteka.com/web-api/v1"
+    CATALOG_URL = "https://alkoteka.com/catalog/"
+    CITY_UUID = "4a70f9e0-46ae-11e7-83ff-00155d026416"
+
+    # Если ставить очень большой лимит, то такие запросы очень быстро забанят
+    PAGE_LIMIT = 20
+
+    def build_options(self, options: List[str]) -> str:
+        if len(options) == 0:
+            return ''
+
+        def generate_options():
+            for o in options:
+                if o.startswith("options-categories"):
+                    key, value = o.split('_', 1)
+                    yield f'{quote_plus(f'options[{key[8:]}][]')}={quote_plus(value)}'
+
+        return '&' + '&'.join(generate_options())
+
+    def build_url(self, category: str, options: List[str], page: int) -> str:
+        return f"{self.API_URL}/product?city_uuid={self.CITY_UUID}&page={page}&per_page={self.PAGE_LIMIT}&root_category_slug={category}{self.build_options(options)}"
+
+    def parse_url(self, url: str) -> tuple[str, list[str]]:
+        path = urlparse(url).path.rstrip('/').split('/')
+        return path[2], path[3:]
+
+    async def start(self):
+        # Не можем использовать стандартный start, так как все сайт использует Client-side rendering
+        # Все данные запрашиваем с их API
+        for url in self.START_URLS:
+            try:
+                category, options = self.parse_url(url)
+                yield scrapy.Request(url=self.build_url(category, options, 1), callback=self.parse,
+                                     cb_kwargs={'category': category, 'options': options})
+            except Exception:
+                print(f'Can\'t request {url}')
+                traceback.print_exc()
+
+    def parse(self, response, **kwargs: Any):
+        data = json.loads(response.text)
+
+        yield from self.parse_pages(response)
+        for i in range(2, -(data['meta']['total'] // -data['meta']['per_page'])):
+            yield scrapy.Request(url=self.build_url(kwargs['category'], kwargs['options'], i), callback=self.parse_pages)
+
+    # Под results нет смысла делать датакласс, так как он зависит от сайта и (может) часто меняться
+    # В таком случае, если какой-то из field пропадёт или появиться новый, то парсер просто крашнется
+    def convert_to_canon(self, result: Mapping[str, Any], url: str):
+        return Product(timestamp=int(datetime.now().timestamp() * 1e3),
+                       RPC=result['uuid'],
+                       url=url,
+                       title=result['name'],
+                       marketing_tags=self.parse_action_labels(result.get('action_labels', [])),
+                       brand=result.get('subname') or result['name'],
+                       # Здесь subname = бренд, но он указан не на всех товарах
+                       section=list(self.parse_category(result.get('category'))),
+                       price_data=PriceData(
+                                original=result.get('prev_price') or result['price'],
+                                current=result['price']
+                            ),
+                       metadata={},
+                       variants=1,
+                       stock=result.get('quantity_total'),
+                       assets=AssetsData(
+                                main_image=result.get('image_url'),
+                                view360=[],
+                                set_images=[],
+                                video=[]
+                            ))
+
+    def parse_category(self, category: Mapping[str, Any]):
+        while not category:
+            yield category['name']
+            category = category['parent']
+
+    def parse_action_labels(self, labels: List[Mapping[str, Any]]):
+        return [item['title'] for item in labels]
+
+    def parse_pages(self, response: scrapy.http.Response, **kwargs: Any):
+        data = json.loads(response.text)
+
+        for result in data['results']:
+            yield scrapy.Request(
+                url=f'https://alkoteka.com/web-api/v1/product/{result["slug"]}?city_uuid={self.CITY_UUID}',
+                callback=self.parse_product)
+
+    def parse_product(self, response: scrapy.http.Response, **kwargs: Any):
+        data = json.loads(response.text)
+        yield self.convert_to_canon(data['results'], response.url)
