@@ -12,6 +12,8 @@ from alco.items import Product, PriceData, AssetsData
 class AlcoSpider(scrapy.Spider):
     START_URLS = [
         "https://alkoteka.com/catalog/slaboalkogolnye-napitki-2",
+        "https://alkoteka.com/catalog/vino",
+        "https://alkoteka.com/catalog/krepkiy-alkogol"
     ]
     name = "alco_spider"
     API_URL = "https://alkoteka.com/web-api/v1"
@@ -62,7 +64,7 @@ class AlcoSpider(scrapy.Spider):
 
     # Под results нет смысла делать датакласс, так как он зависит от сайта и (может) часто меняться
     # В таком случае, если какой-то из field пропадёт или появиться новый, то парсер просто крашнется
-    def convert_to_canon(self, result: Mapping[str, Any], url: str):
+    def convert_to_canon(self, result: Mapping[str, Any], url: str, action_labels: List[Mapping[str, Any]]):
         brand = ''
         for block in result.get('description_blocks', []):
             if block.get('code') == 'brend':
@@ -89,7 +91,7 @@ class AlcoSpider(scrapy.Spider):
                        RPC=result['uuid'],
                        url=url,
                        title=result['name'],
-                       marketing_tags=[item['title'] for item in result.get('filter_labels', [])],
+                       marketing_tags=[item['title'] for item in action_labels],
                        brand=brand,
                        # Здесь subname = бренд, но он указан не на всех товарах
                        section=list(parse_category(result.get('category'))),
@@ -114,8 +116,9 @@ class AlcoSpider(scrapy.Spider):
             yield scrapy.Request(
                 url=f'https://alkoteka.com/web-api/v1/product/{result["slug"]}?city_uuid={self.CITY_UUID}',
                 callback=self.parse_product,
-                cb_kwargs={'url': result['product_url']})
+                cb_kwargs={'url': result['product_url'], 'action_labels': result['action_labels']})
 
-    def parse_product(self, response: scrapy.http.Response, url: str, **kwargs: Any):
+    def parse_product(self, response: scrapy.http.Response, url: str, action_labels: List[Mapping[str, Any]],
+                      **kwargs: Any):
         data = json.loads(response.text)
-        yield self.convert_to_canon(data['results'], url)
+        yield self.convert_to_canon(data['results'], url, action_labels)
