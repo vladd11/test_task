@@ -11,6 +11,6 @@ class DuplicatesPipeline:
 
     def process_item(self, item: Product, spider):
         if item.RPC in self.ids:
-            raise DropItem
+            raise DropItem(f"Duplicate item {item.RPC} found")
         self.ids.add(item.RPC)
         return item

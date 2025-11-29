@@ -14,7 +14,10 @@ class PriceData:
     sale_tag: str = dataclasses.field(init=False)
 
     def __post_init__(self):
-        self.sale_tag = f'Скидка {round(self.original / self.current * 100) - 100}%'
+        if self.current != self.original:
+            self.sale_tag = f'Скидка {round(self.original / self.current * 100) - 100}%'
+        else:
+            self.sale_tag = ''
 
 
 @dataclass

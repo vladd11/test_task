@@ -57,40 +57,55 @@ class AlcoSpider(scrapy.Spider):
 
         yield from self.parse_pages(response)
         for i in range(2, -(data['meta']['total'] // -data['meta']['per_page'])):
-            yield scrapy.Request(url=self.build_url(kwargs['category'], kwargs['options'], i), callback=self.parse_pages)
+            yield scrapy.Request(url=self.build_url(kwargs['category'], kwargs['options'], i),
+                                 callback=self.parse_pages)
 
     # Под results нет смысла делать датакласс, так как он зависит от сайта и (может) часто меняться
     # В таком случае, если какой-то из field пропадёт или появиться новый, то парсер просто крашнется
     def convert_to_canon(self, result: Mapping[str, Any], url: str):
+        brand = ''
+        for block in result.get('description_blocks', []):
+            if block.get('code') == 'brend':
+                for val in block.get('values', []):
+                    if val['enabled']:
+                        brand = val['name']
+
+        description = ' '.join(block.get('content', '') for block in result['text_blocks'])
+        metadata = {
+            '__description': description
+        }
+
+        for block in result.get('description_blocks', []):
+            for val in block.get('values', []):
+                if val.get('enabled'):
+                    metadata[block['code']] = val['name']
+
+        def parse_category(category: Mapping[str, Any]):
+            while category:
+                yield category['name']
+                category = category.get('parent')
+
         return Product(timestamp=int(datetime.now().timestamp() * 1e3),
                        RPC=result['uuid'],
                        url=url,
                        title=result['name'],
-                       marketing_tags=self.parse_action_labels(result.get('action_labels', [])),
-                       brand=result.get('subname') or result['name'],
+                       marketing_tags=[item['title'] for item in result.get('filter_labels', [])],
+                       brand=brand,
                        # Здесь subname = бренд, но он указан не на всех товарах
-                       section=list(self.parse_category(result.get('category'))),
+                       section=list(parse_category(result.get('category'))),
                        price_data=PriceData(
-                                original=result.get('prev_price') or result['price'],
-                                current=result['price']
-                            ),
-                       metadata={},
+                           original=result.get('prev_price') or result['price'],
+                           current=result['price']
+                       ),
+                       metadata=metadata,
                        variants=1,
-                       stock=result.get('quantity_total'),
+                       stock=result.get('quantity_total', 0),
                        assets=AssetsData(
-                                main_image=result.get('image_url'),
-                                view360=[],
-                                set_images=[],
-                                video=[]
-                            ))
-
-    def parse_category(self, category: Mapping[str, Any]):
-        while not category:
-            yield category['name']
-            category = category['parent']
-
-    def parse_action_labels(self, labels: List[Mapping[str, Any]]):
-        return [item['title'] for item in labels]
+                           main_image=result.get('image_url'),
+                           view360=[],
+                           set_images=[result.get('image_url')],
+                           video=[]
+                       ))
 
     def parse_pages(self, response: scrapy.http.Response, **kwargs: Any):
         data = json.loads(response.text)
@@ -98,8 +113,9 @@ class AlcoSpider(scrapy.Spider):
         for result in data['results']:
             yield scrapy.Request(
                 url=f'https://alkoteka.com/web-api/v1/product/{result["slug"]}?city_uuid={self.CITY_UUID}',
-                callback=self.parse_product)
+                callback=self.parse_product,
+                cb_kwargs={'url': result['product_url']})
 
-    def parse_product(self, response: scrapy.http.Response, **kwargs: Any):
+    def parse_product(self, response: scrapy.http.Response, url: str, **kwargs: Any):
         data = json.loads(response.text)
-        yield self.convert_to_canon(data['results'], response.url)
+        yield self.convert_to_canon(data['results'], url)
