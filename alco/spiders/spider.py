@@ -6,14 +6,12 @@ from urllib.parse import urlparse, quote_plus
 
 import scrapy
 
-from alco.items import Product, PriceData, AssetsData
+from alco.items import Product, PriceData, AssetsData, StockData
 
 
 class AlcoSpider(scrapy.Spider):
     START_URLS = [
-        "https://alkoteka.com/catalog/slaboalkogolnye-napitki-2",
-        "https://alkoteka.com/catalog/vino",
-        "https://alkoteka.com/catalog/krepkiy-alkogol"
+        "https://alkoteka.com/catalog/bezalkogolnye-napitki-1/options-categories_voda",
     ]
     name = "alco_spider"
     API_URL = "https://alkoteka.com/web-api/v1"
@@ -101,7 +99,10 @@ class AlcoSpider(scrapy.Spider):
                        ),
                        metadata=metadata,
                        variants=1,
-                       stock=result.get('quantity_total', 0),
+                       stock=StockData(
+                           in_stock=result['available'],
+                           count=result['quantity_total']
+                       ),
                        assets=AssetsData(
                            main_image=result.get('image_url'),
                            view360=[],
@@ -113,10 +114,11 @@ class AlcoSpider(scrapy.Spider):
         data = json.loads(response.text)
 
         for result in data['results']:
-            yield scrapy.Request(
-                url=f'https://alkoteka.com/web-api/v1/product/{result["slug"]}?city_uuid={self.CITY_UUID}',
-                callback=self.parse_product,
-                cb_kwargs={'url': result['product_url'], 'action_labels': result['action_labels']})
+            if result['available']:
+                yield scrapy.Request(
+                    url=f'https://alkoteka.com/web-api/v1/product/{result["slug"]}?city_uuid={self.CITY_UUID}',
+                    callback=self.parse_product,
+                    cb_kwargs={'url': result['product_url'], 'action_labels': result['action_labels']})
 
     def parse_product(self, response: scrapy.http.Response, url: str, action_labels: List[Mapping[str, Any]],
                       **kwargs: Any):
