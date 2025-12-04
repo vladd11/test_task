@@ -56,7 +56,7 @@ class AlcoSpider(scrapy.Spider):
         data = json.loads(response.text)
 
         yield from self.parse_pages(response)
-        for i in range(2, -(data['meta']['total'] // -data['meta']['per_page'])):
+        for i in range(2, -(data['meta']['total'] // -data['meta']['per_page']) + 1):
             yield scrapy.Request(url=self.build_url(kwargs['category'], kwargs['options'], i),
                                  callback=self.parse_pages)
 

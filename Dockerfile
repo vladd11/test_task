@@ -7,4 +7,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD [ "scrapy", "" ]
+CMD [ "scrapy", "crawl", "alco_spider", "-O", "result.json" ]
