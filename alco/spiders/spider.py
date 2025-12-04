@@ -12,6 +12,8 @@ from alco.items import Product, PriceData, AssetsData, StockData
 class AlcoSpider(scrapy.Spider):
     START_URLS = [
         "https://alkoteka.com/catalog/bezalkogolnye-napitki-1/options-categories_voda",
+        "https://alkoteka.com/catalog/vino",
+        "https://alkoteka.com/catalog/krepkiy-alkogol"
     ]
     name = "alco_spider"
     API_URL = "https://alkoteka.com/web-api/v1"
